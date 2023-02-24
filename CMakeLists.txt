@@ -30,16 +30,16 @@ endif()
 
 
 
-
-
 # The top-level CMakeLists.txt file for a project must contain a literal, direct call to the
 # `project()` command. `project()` sets up some helpful variables that describe source/binary
 # directories, and the current project version. This is a standard CMake command.
 
-project(PaulXStretch VERSION 1.6.0)
+project(PaulXStretch VERSION 1.6.1)
 
-set(BUILDVERSION 112)
+set(BUILDVERSION 116)
 
+
+set(CMAKE_CXX_STANDARD 17)
 
 # If you've installed JUCE somehow (via a package manager, or directly using the CMake install
 # target), you'll need to tell this project that it depends on the installed copy of JUCE. If you've
@@ -79,11 +79,19 @@ add_subdirectory(deps/juce EXCLUDE_FROM_ALL )
 
 
 # Extend JUCE with CLAP support from https://github.com/free-audio/clap-juce-extensions
-add_subdirectory(deps/clap-juce-extensions EXCLUDE_FROM_ALL)
+option(PAULXSTRETCH_ENABLE_CLAP "Build clap format plugin " ON)
+
+if (PAULXSTRETCH_ENABLE_CLAP)
+    add_subdirectory(deps/clap-juce-extensions EXCLUDE_FROM_ALL)
+endif()
 
 
 
-set (FormatsToBuild VST3 CLAP Standalone)
+set (FormatsToBuild VST3 Standalone)
+
+if (PAULXSTRETCH_ENABLE_CLAP)
+    list (APPEND FormatsToBuild CLAP)
+endif()
 
 # On Mac, an AU version will be built too
 if (APPLE)

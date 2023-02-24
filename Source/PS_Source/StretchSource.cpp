@@ -316,7 +316,7 @@ void StretchAudioSource::getNextAudioBlock(const AudioSourceChannelInfo & buffer
 	if (m_vol_smoother.getTargetValue() != maingain)
 		m_vol_smoother.setTargetValue(maingain);
 	FloatVectorOperations::disableDenormalisedNumberSupport();
-	float** outarrays = bufferToFill.buffer->getArrayOfWritePointers();
+	auto outarrays = bufferToFill.buffer->getArrayOfWritePointers();
 	int outbufchans = jmin(m_num_outchans, bufferToFill.buffer->getNumChannels());
 	int offset = bufferToFill.startSample;
 	if (m_stretchers.size() == 0)
@@ -563,7 +563,7 @@ void StretchAudioSource::initObjects()
     }
 	m_stretchoutringbuf.clear();
 	m_resampler->Reset();
-	m_resampler->SetRates(m_inputfile->info.samplerate, m_outsr);
+	m_resampler->SetRates(m_inputfile->info.samplerate > 0 ? m_inputfile->info.samplerate : m_outsr, m_outsr);
 	REALTYPE stretchratio = m_playrate;
     FFTWindow windowtype = W_HAMMING;
     if (m_fft_window_type>=0)

@@ -82,7 +82,7 @@ public:
 	void sliderDragStarted(Slider* slid) override;
 	void sliderDragEnded(Slider* slid) override;
 	void buttonClicked(Button* but) override;
-    void comboBoxChanged (ComboBox* comboBoxThatHasChanged);
+    void comboBoxChanged (ComboBox* comboBoxThatHasChanged) override;
 	void updateComponent();
 	void setHighLighted(bool b);
 	int m_group_id = -1;
@@ -177,7 +177,7 @@ public:
 	MyThumbCache() : AudioThumbnailCache(200) 
 	{ 
 		// The default priority of 2 is a bit too low in some cases, it seems...
-		getTimeSliceThread().setPriority(3);
+		// getTimeSliceThread().setPriority(3);
 	}
 	~MyThumbCache() {}
 };
@@ -489,13 +489,15 @@ private:
 class MyFileBrowserComponent : public Component, public FileBrowserListener
 {
 public:
-	MyFileBrowserComponent(PaulstretchpluginAudioProcessor& p);
+	MyFileBrowserComponent(PaulstretchpluginAudioProcessor& p, bool saveMode=false);
 	~MyFileBrowserComponent();
 	void resized() override;
 	void paint(Graphics& g) override;
-	std::function<void(int, File)> OnAction;
-	void selectionChanged() override;
 
+    void selectionChanged() override;
+
+    void refresh();
+    
 	/** Callback when the user clicks on a file in the browser. */
 	void fileClicked(const File& file, const MouseEvent& e) override;
 
@@ -504,11 +506,22 @@ public:
 
 	/** Callback when the browser's root folder changes. */
 	void browserRootChanged(const File& newRoot) override;
+    
+    std::function<void(const File &)> onSaveAction;
+    std::function<void(const File &)> onOpenAction;
+
 private:
+    void updateState();
+
+    LookAndFeel_V3 m_filebwlookandfeel;
+    bool m_saveMode = false;
 	std::unique_ptr<FileBrowserComponent> m_fbcomp;
-	WildcardFileFilter m_filefilter;
+    std::unique_ptr<TextButton> m_deleteButton;
+    std::unique_ptr<TextButton> m_shareButton;
+    std::unique_ptr<TextButton> m_actionButton;
+
+    WildcardFileFilter m_filefilter;
 	PaulstretchpluginAudioProcessor& m_proc;
-	LookAndFeel_V3 m_filebwlookandfeel;
 };
 
 class PaulstretchpluginAudioProcessorEditor  : public AudioProcessorEditor, 
@@ -543,6 +556,8 @@ public:
 
     void componentParentHierarchyChanged (Component& component) override;
 
+    void savePresetInteractive();
+    void saveAsDefault();
     
 	WaveformComponent m_wavecomponent;
 	
@@ -566,7 +581,7 @@ private:
 
     void showPopTip(const String & message, int timeoutMs, Component * target, int maxwidth=100);
 
-    
+
     CustomLookAndFeel m_lookandfeel;
 
 	PaulstretchpluginAudioProcessor& processor;
@@ -610,9 +625,14 @@ private:
     void showAudioSetup();
     void showSettings(bool flag);
 	void toggleFileBrowser();
+    void showExternalFileBrowser();
+    void showLocalFileBrowser(bool flag);
+
+    
 	std::vector<int> m_capturelens{ 2,5,10,30,60,120 };
 	
 	std::unique_ptr<MyFileBrowserComponent> m_filechooser;
+    std::unique_ptr<MyFileBrowserComponent> m_savefilechooser;
     std::unique_ptr<FileChooser> fileChooser;
 	WildcardFileFilter m_filefilter;
 
@@ -642,6 +662,7 @@ private:
 
     std::unique_ptr<CustomTooltipWindow> tooltipWindow;
 
+    
     // keep this down here, so it gets destroyed early
     std::unique_ptr<BubbleMessageComponent> popTip;
 

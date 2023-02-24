@@ -27,6 +27,12 @@ namespace clap { namespace helpers {
    };
 
    template <MisbehaviourHandler h, CheckingLevel l>
+   const clap_plugin_state_context Plugin<h, l>::_pluginStateContext = {
+      clapStateContextSave,
+      clapStateContextLoad,
+   };
+
+   template <MisbehaviourHandler h, CheckingLevel l>
    const clap_plugin_preset_load Plugin<h, l>::_pluginPresetLoad = {
       clapPresetLoadFromFile,
    };
@@ -119,14 +125,14 @@ namespace clap { namespace helpers {
       _plugin.desc = desc;
       _plugin.init = Plugin<h, l>::clapInit;
       _plugin.destroy = Plugin<h, l>::clapDestroy;
-      _plugin.get_extension = nullptr;
-      _plugin.process = nullptr;
-      _plugin.activate = nullptr;
-      _plugin.deactivate = nullptr;
-      _plugin.start_processing = nullptr;
-      _plugin.stop_processing = nullptr;
-      _plugin.reset = nullptr;
-      _plugin.on_main_thread = nullptr;
+      _plugin.get_extension = Plugin<h, l>::clapExtension;
+      _plugin.process = Plugin<h, l>::clapProcess;
+      _plugin.activate = Plugin<h, l>::clapActivate;
+      _plugin.deactivate = Plugin<h, l>::clapDeactivate;
+      _plugin.start_processing = Plugin<h, l>::clapStartProcessing;
+      _plugin.stop_processing = Plugin<h, l>::clapStopProcessing;
+      _plugin.reset = Plugin<h, l>::clapReset;
+      _plugin.on_main_thread = Plugin<h, l>::clapOnMainThread;
    }
 
    /////////////////////
@@ -140,14 +146,12 @@ namespace clap { namespace helpers {
    bool Plugin<h, l>::clapInit(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin, false);
 
-      self._plugin.get_extension = Plugin<h, l>::clapExtension;
-      self._plugin.process = Plugin<h, l>::clapProcess;
-      self._plugin.activate = Plugin<h, l>::clapActivate;
-      self._plugin.deactivate = Plugin<h, l>::clapDeactivate;
-      self._plugin.start_processing = Plugin<h, l>::clapStartProcessing;
-      self._plugin.stop_processing = Plugin<h, l>::clapStopProcessing;
-      self._plugin.reset = Plugin<h, l>::clapReset;
-      self._plugin.on_main_thread = Plugin<h, l>::clapOnMainThread;
+      if (l >= CheckingLevel::Minimal && self._wasInitialized) {
+         std::cerr << "clap_plugin.init() has been called twice" << std::endl;
+         if (h == MisbehaviourHandler::Terminate)
+            std::terminate();
+         return true;
+      }
 
       self._wasInitialized = true;
 
@@ -157,17 +161,38 @@ namespace clap { namespace helpers {
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
+   void Plugin<h, l>::ensureInitialized(const char *method) const noexcept {
+      if (l == CheckingLevel::None || _wasInitialized)
+         return;
+
+      std::cerr << "clap_plugin." << method << "() was called before clap_plugin.init()" << std::endl;
+
+      if (h == MisbehaviourHandler::Terminate)
+         std::terminate();
+   }
+
+   template <MisbehaviourHandler h, CheckingLevel l>
    void Plugin<h, l>::clapDestroy(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin, false);
       self.ensureMainThread("clap_plugin.destroy");
       self._isBeingDestroyed = true;
+
+      if (self._isGuiCreated)
+      {
+         if (l >= CheckingLevel::Minimal)
+            self._host.pluginMisbehaving("host forgot to destroy the gui");
+         clapGuiDestroy(plugin);
+      }
+
       self.runCallbacksOnMainThread();
-      delete &from(plugin);
+
+      delete &self;
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
    void Plugin<h, l>::clapOnMainThread(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("on_maint_thread");
       self.ensureMainThread("clap_plugin.on_main_thread");
 
       self.runCallbacksOnMainThread();
@@ -206,6 +231,7 @@ namespace clap { namespace helpers {
                                    uint32_t minFrameCount,
                                    uint32_t maxFrameCount) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("activate");
       self.ensureMainThread("clap_plugin.activate");
 
       if (l >= CheckingLevel::Minimal) {
@@ -273,6 +299,7 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    void Plugin<h, l>::clapDeactivate(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("deactivate");
       self.ensureMainThread("clap_plugin.deactivate");
 
       if (l >= CheckingLevel::Minimal) {
@@ -290,6 +317,7 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    bool Plugin<h, l>::clapStartProcessing(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("start_processing");
       self.ensureAudioThread("clap_plugin.start_processing");
 
       if (l >= CheckingLevel::Minimal) {
@@ -312,6 +340,7 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    void Plugin<h, l>::clapStopProcessing(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("stop_processing");
       self.ensureAudioThread("clap_plugin.stop_processing");
 
       if (l >= CheckingLevel::Minimal) {
@@ -334,6 +363,7 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    void Plugin<h, l>::clapReset(const clap_plugin *plugin) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("reset");
       self.ensureAudioThread("clap_plugin.reset");
 
       if (l >= CheckingLevel::Minimal) {
@@ -350,6 +380,7 @@ namespace clap { namespace helpers {
    clap_process_status Plugin<h, l>::clapProcess(const clap_plugin *plugin,
                                                  const clap_process *process) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("process");
       self.ensureAudioThread("clap_plugin.process");
 
       if (l >= CheckingLevel::Minimal) {
@@ -371,9 +402,12 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    const void *Plugin<h, l>::clapExtension(const clap_plugin *plugin, const char *id) noexcept {
       auto &self = from(plugin);
+      self.ensureInitialized("extension");
       self.ensureMainThread("clap_plugin.extension");
 
       if (!strcmp(id, CLAP_EXT_STATE) && self.implementsState())
+         return &_pluginState;
+      if (!strcmp(id, CLAP_EXT_STATE_CONTEXT) && self.implementsStateContext() && self.implementsState())
          return &_pluginState;
       if (!strcmp(id, CLAP_EXT_PRESET_LOAD) && self.implementsPresetLoad())
          return &_pluginPresetLoad;
@@ -385,6 +419,8 @@ namespace clap { namespace helpers {
          return &_pluginLatency;
       if (!strcmp(id, CLAP_EXT_AUDIO_PORTS) && self.implementsAudioPorts())
          return &_pluginAudioPorts;
+      if (!strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) && self.implementsAudioPortsConfig())
+         return &_pluginAudioPortsConfig;
       if (!strcmp(id, CLAP_EXT_PARAMS) && self.implementsParams())
          return &_pluginParams;
       if (!strcmp(id, CLAP_EXT_QUICK_CONTROLS) && self.implementQuickControls())
@@ -426,7 +462,7 @@ namespace clap { namespace helpers {
    template <MisbehaviourHandler h, CheckingLevel l>
    uint32_t Plugin<h, l>::clapTailGet(const clap_plugin_t *plugin) noexcept {
       auto &self = from(plugin);
-      return self.latencyGet();
+      return self.tailGet();
    }
 
    //--------------------//
@@ -488,6 +524,29 @@ namespace clap { namespace helpers {
       self.ensureMainThread("clap_plugin_state.load");
 
       return self.stateLoad(stream);
+   }
+
+   //---------------------------//
+   // clap_plugin_state_context //
+   //---------------------------//
+   template <MisbehaviourHandler h, CheckingLevel l>
+   bool Plugin<h, l>::clapStateContextSave(const clap_plugin *plugin,
+                                           const clap_ostream *stream,
+                                           uint32_t context) noexcept {
+      auto &self = from(plugin);
+      self.ensureMainThread("clap_plugin_state_context.save");
+
+      return self.stateContextSave(stream, context);
+   }
+
+   template <MisbehaviourHandler h, CheckingLevel l>
+   bool Plugin<h, l>::clapStateContextLoad(const clap_plugin *plugin,
+                                           const clap_istream *stream,
+                                           uint32_t context) noexcept {
+      auto &self = from(plugin);
+      self.ensureMainThread("clap_plugin_state_context.load");
+
+      return self.stateContextLoad(stream, context);
    }
 
    //-------------------------//
@@ -964,7 +1023,20 @@ namespace clap { namespace helpers {
          }
       }
 
-      return self.guiGetSize(width, height);
+      if (!self.guiGetSize(width, height))
+         return false;
+
+      if (l >= CheckingLevel::Maximal && self.guiCanResize()) {
+         uint32_t testWidth = *width;
+         uint32_t testHeight = *height;
+
+         if (!self.guiAdjustSize(&testWidth, &testHeight))
+            self._host.pluginMisbehaving(
+               "the plugin claims to be resizable but the value returned"
+               " by guiGetSize() needs can't be adjusted using guiAdjustSize()");
+      }
+
+      return true;
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
@@ -1016,7 +1088,34 @@ namespace clap { namespace helpers {
          }
       }
 
-      return self.guiAdjustSize(width, height);
+      const uint32_t inputWidth = *width;
+      const uint32_t inputHeight = *height;
+
+      if (!self.guiAdjustSize(width, height))
+         return false;
+
+      if (l >= CheckingLevel::Maximal) {
+         uint32_t testWidth = *width;
+         uint32_t testHeight = *height;
+
+         if (!self.guiAdjustSize(&testWidth, &testHeight))
+         {
+            self._host.pluginMisbehaving("clap_plugin_gui.adjust_size() failed when called with adjusted values");
+            return true;
+         }
+
+         if (testWidth != *width || testHeight != *height)
+         {
+            std::ostringstream os;
+            os << "clap_plugin_gui.adjust_size() isn't stable:" << std::endl
+               << "  (" << inputWidth << ", " << inputHeight << ") -> (" << *width << ", " << *height << ")" << std::endl
+               << "  (" << *width << ", " << *height << ") -> (" << testWidth << ", " << testHeight << ")" << std::endl
+               << "  !! Check you're rounding math!";
+            self._host.pluginMisbehaving(os.str());
+         }
+      }
+
+      return true;
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
@@ -1171,6 +1270,7 @@ namespace clap { namespace helpers {
       self.guiDestroy();
       self._isGuiCreated = false;
       self._isGuiEmbedded = false;
+      self._isGuiFloating = false;
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
@@ -1279,7 +1379,10 @@ namespace clap { namespace helpers {
       if (!_host.canUseThreadCheck() || _host.isMainThread())
          return;
 
-      std::terminate();
+      std::cerr << "thread-error: this code must be running on the main thread" << std::endl;
+
+      if (h == MisbehaviourHandler::Terminate)
+         std::terminate();
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
@@ -1287,10 +1390,13 @@ namespace clap { namespace helpers {
       if (l == CheckingLevel::None)
          return;
 
-      if (_host.canUseThreadCheck() || _host.isAudioThread())
+      if (!_host.canUseThreadCheck() || _host.isAudioThread())
          return;
 
-      std::terminate();
+      std::cerr << "thread-error: this code must be running on the audio thread" << std::endl;
+
+      if (h == MisbehaviourHandler::Terminate)
+         std::terminate();
    }
 
    template <MisbehaviourHandler h, CheckingLevel l>
